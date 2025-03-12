@@ -1,6 +1,6 @@
 Django==1.11.29
 Flask==0.12.3 
-urllib3==1.23
+urllib3==1.26.19
 Jinja2==2.10 
 PyYAML==4.1
 MarkupSafe==1.0  
