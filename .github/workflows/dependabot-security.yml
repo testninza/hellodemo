@@ -1,0 +1,40 @@
+name: "Dependabot Security Check"
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # Runs daily
+  workflow_dispatch: # Allows manual trigger
+
+permissions:
+  security-events: read
+  pull-requests: write
+
+jobs:
+  check-dependabot-alerts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch Dependabot Security Alerts
+        id: get_alerts
+        run: |
+          RESPONSE=$(curl -s -H "Accept: application/vnd.github+json" \
+                          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                          "https://api.github.com/repos/${{ github.repository }}/dependabot/alerts")
+
+          echo "$RESPONSE" > dependabot-alerts.json
+
+      - name: Fail Pipeline on Critical Vulnerabilities
+        id: check_vulns
+        run: |
+          CRITICAL_COUNT=$(jq '[.[] | select(.security_advisory.severity == "critical")] | length' dependabot-alerts.json)
+          
+          if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "❌ Found $CRITICAL_COUNT critical vulnerabilities!"
+            echo "Check the Dependabot alerts for details."
+            exit 1
+          else
+            echo "✅ No critical vulnerabilities found."
+          fi
