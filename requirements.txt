@@ -1,1 +1,2 @@
 pycrypto==2.6.1
+tensorflow==1.15.0
