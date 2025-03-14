@@ -1,45 +1,136 @@
-name: "Dependabot Security Check"
+name: SCA USING TRIVY
 
-on:
-  schedule:
-    - cron: "0 0 * * *" # Runs daily
-  workflow_dispatch: # Allows manual trigger
+on: 
+  push:
+    branches:
+      - main  
+      - master
   pull_request:
-
-permissions:
-  security-events: read
-  pull-requests: write
+    branches:
+      - main
 
 jobs:
-  check-dependabot-alerts:
+  FILTER_FILES:
     runs-on: ubuntu-latest
-
+    if: github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        repository:
+          - "testninza/HELLOSAMPLE"
+    outputs:
+      trivy_triggered: ${{ steps.changes.outputs.dependencies }}
     steps:
-      - name: Checkout repository
+      - name: Checkout ${{ matrix.repository }}
         uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repository }}
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
 
-      - name: Fetch Dependabot Security Alerts
-        id: get_alerts
+      - name: Filter changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            dependencies:
+              - 'package-lock.json'
+              - 'pom.xml'
+              - 'requirements.txt'
+              - 'yarn.lock'
+
+      - name: Dependencies changes detect in PR
+        if: steps.changes.outputs.dependencies != 'true'
+        run: echo "::notice file=Filter Files::No dependency files were changed in this pull request. 🚫 Skipping Trivy scan."
+
+
+  SCA-USING-TRIVY:
+    needs: FILTER_FILES
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      matrix:
+        repository:
+          - "ORG/REPO1"
+          - "ORG/REPO2"
+          - "ORG/REPO3"
+    if: always() && (needs.FILTER_FILES.outputs.trivy_triggered == 'true' || github.event_name == 'push')
+    steps:
+      - name: Checkout ${{ matrix.repository }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repository }}
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+      - name: Generate Trivy Vulnerability Report
+        id: Trivy_vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          output: trivy-report.json
+          scanners: vuln,license
+          format: json
+          scan-ref: .
+          exit-code: 0
+      
+      - name: Upload Vulnerability Scan Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report-${{ matrix.repository }}
+          path: trivy-report.json
+          retention-days: 30
+      
+      - name: Fail build on High/Critical Vulnerabilities
+        id: high_Vulnerability
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scanners: vuln,license
+          format: table
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          skip-setup-trivy: true
+
+      - name: Parse Data
+        if: always() && steps.Trivy_vulnerabilities.outcome == 'success'
+        id: parse_vuln
         run: |
-          RESPONSE=$(curl -s -H "Accept: application/vnd.github+json" \
-                          -H "Authorization: Bearer ${{ secrets.GIT_TOKEN }}" \
-                          "https://api.github.com/repos/${{ github.repository }}/dependabot/alerts")
-
-          echo "$RESPONSE" > dependabot-alerts.json
-
-      - name: echo result
-        run: |
-              cat dependabot-alerts.json
-
-      - name: Fail Pipeline on Critical Vulnerabilities
-        id: check_vulns
-        run: |
-          CRITICAL_COUNT=$(jq 'map(select(.security_advisory and .security_advisory.severity == "critical")) | length' dependabot-alerts.json)
+          vuln_count=$(jq '[.Results[]?.Vulnerabilities[]? ] | length' trivy-report.json)
+          echo "Vulnerability count: $vuln_count"
           
-          if [ "$CRITICAL_COUNT" -gt 0 ]; then
-            echo "❌ Found $CRITICAL_COUNT critical vulnerabilities!"
-            echo "Check the Dependabot alerts for details."
-            exit 1
+          if [ "$vuln_count" -gt 0 ]; then
+            echo "CVE_found=true" >> $GITHUB_ENV
           else
-            echo "✅ No critical vulnerabilities found."
+            echo "CVE_found=false" >> $GITHUB_ENV
           fi
+
+      - name: Generate Message for Slack Notification
+        id: Message_slack
+        if: always() && env.CVE_found == 'true'
+        run: |
+          vulnerabilities=$(jq -r '.Results[]?.Vulnerabilities[]? | " *Title:* \(.Title)\n -------------------"' trivy-report.json)
+          vulnerabilities=$(echo "$vulnerabilities" | sed ':a;N;$!ba;s/\n/\\n/g')
+          echo "message=$vulnerabilities" >> $GITHUB_ENV
+
+      - name: Post blocks to a Slack channel
+        if: always()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SECURITY_SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.SECURITY_SLACK_CHANNEL_ID }}",
+              "text": "Trivy SCA Scan Result for ${{ matrix.repository }}: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ env.message }}"
+                  }
+                }
+              ]
+            }
