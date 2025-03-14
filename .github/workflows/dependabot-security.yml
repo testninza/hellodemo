@@ -29,7 +29,7 @@ jobs:
       - name: Fail Pipeline on Critical Vulnerabilities
         id: check_vulns
         run: |
-          CRITICAL_COUNT=$(jq '[.[] | select(.security_advisory.severity == "critical")] | length' dependabot-alerts.json)
+          CRITICAL_COUNT=$(jq 'map(select(.security_advisory and .security_advisory.severity == "critical")) | length' dependabot-alerts.json)
           
           if [ "$CRITICAL_COUNT" -gt 0 ]; then
             echo "❌ Found $CRITICAL_COUNT critical vulnerabilities!"
