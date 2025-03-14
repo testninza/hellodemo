@@ -1,2 +1,1 @@
-pycrypto==2.6.1
-tensorflow==1.15.0
+MarkupSafe==1.0
