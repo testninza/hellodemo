@@ -27,6 +27,10 @@ jobs:
 
           echo "$RESPONSE" > dependabot-alerts.json
 
+      - name: echo result
+        run: |
+              cat dependabot-alerts.json
+
       - name: Fail Pipeline on Critical Vulnerabilities
         id: check_vulns
         run: |
