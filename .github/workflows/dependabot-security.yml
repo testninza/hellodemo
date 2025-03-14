@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: "0 0 * * *" # Runs daily
   workflow_dispatch: # Allows manual trigger
+  pull_request:
 
 permissions:
   security-events: read
