@@ -1,0 +1,135 @@
+name: SCA USING TRIVY
+
+on: 
+  push:
+    branches:
+      - main  
+      - master
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  FILTER_FILES:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    strategy:
+      matrix:
+          repository: 
+            - testninza/HELLOSAMPLE
+          
+    outputs:
+      trivy_triggered: ${{ steps.changes.outputs.dependencies }}
+    steps:
+      - name: Checkout ${{ matrix.repository }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repository }}
+          token: ${{ secrets.GIT_TOKEN }}
+
+      - name: Filter changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            dependencies:
+              - 'package-lock.json'
+              - 'pom.xml'
+              - 'requirements.txt'
+              - 'yarn.lock'
+
+      - name: Dependencies changes detect in PR
+        if: steps.changes.outputs.dependencies != 'true'
+        run: echo "::notice file=Filter Files::No dependency files were changed in this pull request. 🚫 Skipping Trivy scan."
+
+
+  SCA-USING-TRIVY:
+    needs: FILTER_FILES
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      matrix:
+        repository: 
+          - "testninza/HELLOSAMPLE"
+    if: always() && (needs.FILTER_FILES.outputs.trivy_triggered == 'true' || github.event_name == 'push')
+    steps:
+      - name: Checkout ${{ matrix.repository }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repository }}
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+      - name: Generate Trivy Vulnerability Report
+        id: Trivy_vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          output: trivy-report.json
+          scanners: vuln,license
+          format: json
+          scan-ref: .
+          exit-code: 0
+      
+      - name: Upload Vulnerability Scan Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report-${{ matrix.repository }}
+          path: trivy-report.json
+          retention-days: 30
+      
+      - name: Fail build on High/Critical Vulnerabilities
+        id: high_Vulnerability
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scanners: vuln,license
+          format: table
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          skip-setup-trivy: true
+
+      - name: Parse Data
+        if: always() && steps.Trivy_vulnerabilities.outcome == 'success'
+        id: parse_vuln
+        run: |
+          vuln_count=$(jq '[.Results[]?.Vulnerabilities[]? ] | length' trivy-report.json)
+          echo "Vulnerability count: $vuln_count"
+          
+          if [ "$vuln_count" -gt 0 ]; then
+            echo "CVE_found=true" >> $GITHUB_ENV
+          else
+            echo "CVE_found=false" >> $GITHUB_ENV
+          fi
+
+      # - name: Generate Message for Slack Notification
+      #   id: Message_slack
+      #   if: always() && env.CVE_found == 'true'
+      #   run: |
+      #     vulnerabilities=$(jq -r '.Results[]?.Vulnerabilities[]? | " *Title:* \(.Title)\n -------------------"' trivy-report.json)
+      #     vulnerabilities=$(echo "$vulnerabilities" | sed ':a;N;$!ba;s/\n/\\n/g')
+      #     echo "message=$vulnerabilities" >> $GITHUB_ENV
+
+      # - name: Post blocks to a Slack channel
+      #   if: always()
+      #   uses: slackapi/slack-github-action@v2.0.0
+      #   with:
+      #     method: chat.postMessage
+      #     token: ${{ secrets.SECURITY_SLACK_BOT_TOKEN }}
+      #     payload: |
+      #       {
+      #         "channel": "${{ secrets.SECURITY_SLACK_CHANNEL_ID }}",
+      #         "text": "Trivy SCA Scan Result for ${{ matrix.repository }}: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}",
+      #         "blocks": [
+      #           {
+      #             "type": "section",
+      #             "text": {
+      #               "type": "mrkdwn",
+      #               "text": "${{ env.message }}"
+      #             }
+      #           }
+      #         ]
+      #       }
