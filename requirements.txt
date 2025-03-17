@@ -10,7 +10,7 @@ cryptography==2.3
 pillow==6.2.1
 psutil==5.6.1
 lxml==4.2.5
-paramiko==2.4.1
+paramiko==3.5.1
 numpy==1.16.0
 scipy==1.2.0
 jinja2==2.8.1
