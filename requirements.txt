@@ -50,7 +50,7 @@ selenium==3.141.0
 django-cors-headers==3.1.1
 django-rest-framework==3.9.4
 django-haystack==2.8.1
-pytesseract==0.3.0
+pytesseract==0.3.13
 pdfminer==20191125
 scrapy==2.0.0
 pyzmq==18.1.0
