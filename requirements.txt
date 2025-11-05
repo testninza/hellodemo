@@ -1,5 +1,5 @@
 Flask==0.12.3
-Django==1.11.29
+Django==4.2.26
 requests==2.19.1
 urllib3==1.23
 PyYAML==4.1
